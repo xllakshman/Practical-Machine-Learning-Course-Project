@@ -1,0 +1,138 @@
+---
+title: "PML Course Project"
+author: "Lakshman"
+date: "July 27, 2016"
+output: html_document
+---
+### Executive Summary:
+#### Intially removed columns with >60% of NAs in the dataset using 'cleanData'. Loaded data and removed not required first 7 columns in dataset(pt). 
+#### Created 'trainset' to train the model. 'validset' to validate the model and then use algoritms on 'testset'. 'Decision Trees', 'GBM' & 'RF' methods have been used for analysis. Out of this GBM and RF are close with utmost accuracy on 'validset' with > 95% accuracy.Used Cross validation with 10 iterations on all 3 methods in 'train' function as parameter to 'trControl' argument.
+#### Used parallel processing for faster data processing. Finally cleaned NAs same as 'pt' dataset and predicted using Decision trees, GBM & RFs on 'testset'. GBM and RF gave output with same accuracy. SO the error Rate is 100-99.54 = 0.046 i.e. 0.46%
+#### APPLIED OUTPUT on 20 Cases gave 100% accuracy output as:B A B A A E D B A A B C B A E E A B B B. 
+
+#### Loading required libraries for data analysis
+```{r}
+library(caret)
+library(dplyr)
+library(rpart.plot)
+```
+
+### Clean Dataset Function
+#### Using cleanData function try to remove NAs and check any columns with near zero variance. apply() function detects number of NAs in each column of the dataset. 'rm60col' with 'pmldf' filters those columns with more than 60% of NAs.Total 52 columns have non zero variance.
+```{r}
+cleanData = function(pmldf) {
+  
+dfNA = data.frame(apply(is.na(pmldf),2,sum)) # NAs Exist & convert to data frame for further use
+rm60col =dfNA/nrow(pmldf)>0.6
+
+pmldf = pmldf[,!rm60col]
+dim(pmldf)
+#glimpse(pmldf)
+apply(is.na(pmldf),2,sum) # Cheeck again for any missing values
+
+rmNzvCol = nearZeroVar(pmldf,saveMetrics = TRUE) # all false indicate no nearzerovar variables in dataset
+rmNzvCol
+#nrow(rmNzvCol)
+dim(pmldf)
+
+return(data.frame(pmldf))
+}
+
+```
+
+### loading data and initial processing of data
+#### load pml train dataset and filter 'classe'variable initially and also initial 7 columns as they are not essential for further analysis.
+#### Convert all variables to numeric and call 'cleanData' function along add back 'classe' variable.
+### No exploratory analysis given as main focus on machine learning.
+```{r Train data load}
+
+pt = read.csv("pml-training.csv", na.strings = c("NA","NaN","NULL","!DIV/0",""," "))
+#pt = read.csv("pmltrain.csv")
+ptbackup = pt
+
+dim(pt)
+#glimpse(pt)
+classe = factor(pt$classe)
+class(classe)
+pt= pt[,-ncol(pt)]
+pt =apply(pt,2,as.numeric) # COnvert all variables to numeric & remove response variable column
+#apply(pt,2,typeof)
+pt = pt[,-(1:7)]  # remove till num_window as variables not required for further analysis
+dim(pt)
+#library(dplyr)
+#glimpse(pt) # Veryfying required variables intact or not
+pt = cleanData(pt)
+pt = data.frame(pt)
+
+pt$classe = classe # # pt = mutate(pt,  classe =classe)
+class(pt$classe)
+#glimpse(pt)
+dim(pt)
+
+```
+
+### Training the model using rpart, gbm and random forests and compare accuracies
+#### No missing values so NO imputation required. create 'trainset' and 'validset'. Use 'parallel' for multi-core processing. trained 3 models on 'trainset' and applied all three techniques 1)'Decision Trees' - with 50% accuracy on 'validset'. 2) 'GBM Method' - with >96% accuracy on validset and 3) 'random forest-RF' method with >99% accuracy on 'validset' . looking at accracy both GBM and RF methods are suitable.
+#### used cross validataion with 10 iterations and allowed parallel processing in 'train' fucntion and in trControl parameter.
+
+```{r train & validset model}
+#library(caret)
+#pt = pt[sample(n),]
+sum(is.na(pt))
+inTrain = createDataPartition(y=pt$classe,p=0.9,list = FALSE) 
+
+trainset = pt[inTrain,]
+validset = pt[-inTrain,]
+
+library(parallel) # parallelizing for faster output
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+trctrl = trainControl(method = "cv", number = 10, allowParallel = TRUE )
+rpart_model = train(classe~., data = trainset, method = "rpart", trControl = trctrl)
+gbm_model = train(classe~., data = trainset, method = "gbm", trControl = trctrl,verbose= TRUE)
+rf_model = train(classe~., data = trainset, method = "rf", trControl = trctrl)
+
+stopCluster(cluster)
+
+prp(rpart_model$finalModel)
+
+rpart_pred = predict(rpart_model,validset)
+confusionMatrix(rpart_pred,validset$classe)
+
+gbm_pred = predict(gbm_model,validset)
+confusionMatrix(gbm_pred,validset$classe)
+
+rf_pred= predict(rf_model,validset)
+confAcc=confusionMatrix(rf_pred,validset$classe)
+
+errorRateRF = 1-confAcc$overall[1]
+library(scales)
+percent(errorRateRF)
+
+```
+
+
+### Load test set, preprocess data and predict using pml-testing set
+#### Load pml test set and remove initial 7 columns and apply 'cleanData' function for removing NA columns.Removed problem_id as it is not required. Both 'GBM' and 'RF' gives same output on testset with 100% accurate prediction (answers all 20 questions correctly in the assignment)
+```{r}
+
+testset = read.csv("pml-testing.csv")
+dim(testset)
+#glimpse(testset)
+
+testset = testset[,-c(1:7)]
+
+testset1 = cleanData(testset) # clear NAs from testset dataset
+dim(testset1)
+Pred_cases= testset1$problem_id
+testset1$problem_id = NULL
+rpart.test_pred = predict(rpart_model, newdata = testset1)
+rpart.test_pred
+gbm.test_pred = predict(gbm_model, newdata = testset1)
+gbm.test_pred
+rf.test_pred = predict(rf_model, newdata = testset1)
+data.frame(Pred_cases, rf.test_pred)
+```
+
